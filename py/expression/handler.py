@@ -1,8 +1,9 @@
 import operator
+import traceback
 
-from .validation import ValidateArg, Arg, ValidateError
-from .types import Empty, ExpDict, ExpOp
+from .types import Empty, ExpDict, ExpOp, ExpReturn
 from .util import torch
+from .validation import Arg, ValidateArg, ValidateError
 
 
 class HandlerError(Exception):
@@ -63,7 +64,8 @@ class BaseHandler:
             val = self.handle(obj, getter)
             return self.validate_output(obj, val)
         except Exception as exc:
-            raise HandlerError(f'Error evaluating "{obj.name}":\n  {exc!r}') from exc
+            tb = traceback.format_exc()
+            raise HandlerError(f'Error evaluating "{obj.name}": {exc!s}\n{tb}') from exc
 
     def safe_get(self, key, obj, getter=None, *, default=Empty):
         str_key = isinstance(key, str)
@@ -365,6 +367,13 @@ class SetVarHandler(BaseHandler):
         return val
 
 
+class ReturnHandler(BaseHandler):
+    input_validators = (Arg.present("expression"),)
+
+    def handle(self, obj, getter):
+        raise ExpReturn(self.safe_get("expression", obj, getter))
+
+
 LOGIC_HANDLERS = {
     "||": OrHandler(),
     "&&": AndHandler(),
@@ -400,6 +409,9 @@ MATH_HANDLERS = {
     ">=": RelComparisonHandler(operator.ge),
     "min": MinHandler(),
     "max": MaxHandler(),
+    "float": UnarySimpleMathHandler(handler=float),
+    "int": UnarySimpleMathHandler(handler=int),
+    "bool": UnarySimpleMathHandler(handler=bool),
 }
 for k, alias in (
     ("+", "add"),
@@ -420,6 +432,7 @@ MISC_HANDLERS = {
     "dict": DictHandler(),
     "comment": CommentHandler(),
     "set_var": SetVarHandler(),
+    "return": ReturnHandler(),
 }
 
 BASIC_HANDLERS = LOGIC_HANDLERS | MATH_HANDLERS | MISC_HANDLERS
