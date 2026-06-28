@@ -1,20 +1,21 @@
-import re
 import operator
+import re
 
 from tqdm import tqdm
 
-from .parser import Parser, ParserSpec, ParseError
+from .parser import ParseError, Parser, ParserSpec
 from .types import (
     Empty,
     ExpBase,
-    ExpOp,
     ExpBinOp,
-    ExpSym,
-    ExpStatements,
-    ExpFunAp,
-    ExpTuple,
     ExpDict,
+    ExpFunAp,
     ExpKV,
+    ExpMethodAp,
+    ExpOp,
+    ExpStatements,
+    ExpSym,
+    ExpTuple,
 )
 
 COMMA_PRECEDENCE = 2
@@ -36,10 +37,11 @@ class Expression:
         | :>                 # Key value binop
         | :=                 # Assignment
         | ;                  # Sequencing
+        | ::                 # Method call
         | [?:]               # Ternary
         | \[ | ]             # Index
         | \.\.\.             # Index ellipsis
-        | '[-\w.]+           # Symbol
+        | '[-\w.:=]+         # Symbol
         | `?[a-z][\w.]*`?    # Function/variable names
     )
     \s*
@@ -157,9 +159,9 @@ class ExprParserSpec(ParserSpec):
     def split_funap_args(toks):
         if not isinstance(toks, (list, tuple)):
             return ExpTuple((toks,)), ExpDict()
-        return ExpTuple(t for t in toks if not isinstance(t, ExpKV)), ExpDict({
-            str(t.k): t.v for t in toks if isinstance(t, ExpKV)
-        })
+        return ExpTuple(t for t in toks if not isinstance(t, ExpKV)), ExpDict(
+            {str(t.k): t.v for t in toks if isinstance(t, ExpKV)}
+        )
 
     @staticmethod
     def null_constant(p, token, bp):
@@ -199,6 +201,14 @@ class ExprParserSpec(ParserSpec):
                 p.advance()
         p.expect(")")
         return make_funap(left, *cls.split_funap_args(args))
+
+    @classmethod
+    def left_methodcall(cls, p, token, left, bp):
+        methname = p.parse_until(31)
+        p.expect("(")
+        funap = cls.left_funcall(p, token=None, left=methname, bp=None)
+        funap.args = ExpTuple((Empty, *funap.args))
+        return ExpMethodAp(left, funap)
 
     @staticmethod
     def left_comma(p, token, left, bp):
@@ -251,6 +261,7 @@ class ExprParserSpec(ParserSpec):
     def populate(self):
         self.add_left(31, self.left_funcall, ("(",))
         self.add_left(31, self.left_index, ("[",))
+        self.add_left(31, self.left_methodcall, ("::",))
         self.add_leftright(29, self.left_binop, ("**",))
         self.add_null(27, self.null_prefixop, ("+", "-", "!"))
         self.add_left(25, self.left_binop, ("*", "/"))
